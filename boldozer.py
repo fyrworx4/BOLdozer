@@ -3,19 +3,27 @@ from tkinter import *
 from tkinter import messagebox
 from tkinter import filedialog
 
-# Modules for HTML File Parsing
+# Modules for HTML File Reading
 import codecs
 import io
 from bs4 import BeautifulSoup as bs
 
+# Modules for HTML File Parsing
 import re
+import xlrd
 from datetime import date
 
-root = Tk()
+# Modules for Mail Merge
+from mailmerge import MailMerge
+import os
+import sys
+import subprocess
+
 
 def initialGui():
 
     # Tkinter settings
+    root = Tk()
     root.title("BOLdozer 2")
     #root.geometry('300x200')
     #root.configure(bg='#3E4149')
@@ -66,7 +74,7 @@ def initialGui():
 
 
 
-def readHtmlFile(html_file_path, dest_path):
+def readHtmlFile(html_file_path):
     
     # Read HTML file
     html_file_messy = codecs.open(html_file_path, 'r').read()
@@ -87,12 +95,20 @@ def readHtmlFile(html_file_path, dest_path):
 
 def sortHtmlFile(html_file_list):
     
+    # The sortHtmlFile function takes the info from html_file_list and
+    # parses it into 
+
     # Define some variables
     range_of_list = range(len(html_file_list))
     order_list = []
-    global load_no
+    weight_list = []
+    pkgs_list = []
+    master_order_list = []
+    today = date.today().strftime('%m-%d-%Y')
+
 
     # Extract load number, which is always the 2nd item
+    global load_no
     load_no = html_file_list[1]
     
     # Extract Total PO, Pick Stop Number
@@ -116,26 +132,135 @@ def sortHtmlFile(html_file_list):
             while count < total_po:
                 if pik_stp_no == html_file_list[num+1]:
                     order_list.append({
-                        'po':html_file_list[num+4],
+                        'po_num':html_file_list[num+4],
                         'dc':html_file_list[num+5],
-                        'pkg':html_file_list[num+11],
-                        'wt':html_file_list[num+12],
+                        'pkgs':html_file_list[num+11],
+                        'weight':html_file_list[num+12],
                         'mabd':html_file_list[num+15][:-9],
-                        'ln':load_no,
-                        'date':date.today().strftime('%m-%d-%Y')
-                        })
+                        'load_no':load_no,
+                        'date':today
+                    })
                 num += 15
                 count += 1
 
-    return order_list
+    # Map DCs to locations, add locations to order_list
+    total_po_ours = len(order_list)
+    excel_file = ('./dc-mappings.xlsx')
+    wb = xlrd.open_workbook(excel_file)
+    dc_mappings = wb.sheet_by_index(0)
+
+    for i in range(total_po_ours):
+        for num in range(dc_mappings.nrows):
+            if int(order_list[i]['dc']) == int(dc_mappings.cell_value(num,0)):
+                order_list[i].update({
+                    'address':dc_mappings.cell_value(num,1),
+                    'city_state_zip':dc_mappings.cell_value(num,2)
+                })
+    
+    # Calculate total weight and total packages
+    for i in range(total_po_ours):
+        weight_list.append(int(order_list[i]['weight']))
+        pkgs_list.append(int(order_list[i]['pkgs']))
+
+    tw = sum(weight_list)
+    tp = sum(pkgs_list)
+
+    # Calculate total page numbers
+    if type(total_po_ours / 8) == int:
+        total_pages = int(total_po_ours/8)
+    else:
+        total_pages = int(((total_po_ours-(total_po_ours%8))/8)+1)
+
+    # Organize data into master order list for master BOL
+    for i in range(total_po_ours):
+
+        # Check if beginning of series
+        if i % 8 == 0:
+
+            # Add page number, total pages, load number, and date for each page
+            master_order_list.append({
+                'p_n':str(int(i/8)+1),
+                'to_p':str(total_pages),
+                'load_no':str(load_no),
+                'date':today
+            })
+
+            # Define some variables
+            dict_no = int((i-(i%8))/8)
+            distance = total_po_ours - i
+            current_page = master_order_list[dict_no]
+
+            # Add data to page dictionaries
+            if distance >= 8:
+                count = 0
+                while count < 8:
+                    current_page.update({
+                        f'd{count}':str(order_list[dict_no+count]['dc']),
+                        f'p{count}':str(order_list[dict_no+count]['po_num']),
+                        f'c{count}':str(order_list[dict_no+count]['pkgs']),
+                        f'w{count}':str(order_list[dict_no+count]['weight']),
+                        f'm{count}':str(order_list[dict_no+count]['mabd'])
+                    })
+                    count += 1
+                current_page.update({'tw':'','tp':''})
+            else:
+                count = 0
+                while count < distance:
+                    current_page.update({
+                        f'd{count}':str(order_list[dict_no+count]['dc']),
+                        f'p{count}':str(order_list[dict_no+count]['po_num']),
+                        f'c{count}':str(order_list[dict_no+count]['pkgs']),
+                        f'w{count}':str(order_list[dict_no+count]['weight']),
+                        f'm{count}':str(order_list[dict_no+count]['mabd']),
+                        'tw':str(tw),
+                        'tp':str(tp)
+                    })
+                    count += 1
+
+    return order_list, master_order_list
+
+
+def mailMerge(order_list, master_order_list, dest_path):
+
+    #directory = os.getcwd()
+
+    if os.path.isfile(f'{dest_path}/Walmart BOL {load_no}.docx'):
+        os.remove(f'{dest_path}/Walmart BOL {load_no}.docx')
+    
+    if os.path.isfile(f'{dest_path}/Walmart Master BOL Load ID {load_no}.docx'):
+        os.remove(f'{dest_path}/Walmart Master BOL Load ID {load_no}.docx')
+
+
+    bol = MailMerge('bol_template.docx')
+    bol.merge_pages(order_list)
+    bol.write(f'{dest_path}/Walmart BOL {load_no}.docx')
+
+    master_bol= MailMerge('master_bol_template copy.docx')
+    master_bol.merge_pages(master_order_list)
+    master_bol.write(f'{dest_path}/Walmart Master BOL Load ID {load_no}.docx')
+
+    if sys.platform == 'darwin':
+        def openFolder(path):
+            subprocess.Popen(['open', '--', path])
+    elif sys.platform == 'linux2':
+        def openFolder(path):
+            subprocess.Popen(['xdg-open', '--', path])
+    elif sys.platform == 'win32':
+        def openFolder(path):
+            subprocess.Popen(['explorer', path])
+    
+    openFolder(dest_path)
+
+    
 
 # Run initialGui and assign two variables to it's output
 html_file_path, dest_path = initialGui()
 
 # Run readHtmlFile using those variables
-html_file_list = readHtmlFile(html_file_path, dest_path)
+html_file_list = readHtmlFile(html_file_path)
 
 # Run sortHtmlFile
-order_list = sortHtmlFile(html_file_list)
+order_list, master_order_list = sortHtmlFile(html_file_list)
 
-print(order_list)
+# Run mailMerge
+mailMerge(order_list, master_order_list, dest_path)
