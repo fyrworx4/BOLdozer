@@ -235,7 +235,7 @@ def mailMerge(order_list, master_order_list, dest_path):
     bol.merge_pages(order_list)
     bol.write(f'{dest_path}/Walmart BOL {load_no}.docx')
 
-    master_bol= MailMerge('master_bol_template copy.docx')
+    master_bol= MailMerge('master_bol_template.docx')
     master_bol.merge_pages(master_order_list)
     master_bol.write(f'{dest_path}/Walmart Master BOL Load ID {load_no}.docx')
 
