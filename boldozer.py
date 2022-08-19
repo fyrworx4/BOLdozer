@@ -10,7 +10,6 @@ from bs4 import BeautifulSoup as bs
 
 # Modules for HTML File Parsing
 import re
-import xlrd
 from datetime import date
 
 # Modules for Mail Merge
@@ -18,13 +17,14 @@ from mailmerge import MailMerge
 import os
 import sys
 import subprocess
+import csv
 
 
 def initialGui():
 
     # Tkinter settings
     root = Tk()
-    root.title("BOLdozer 2")
+    root.title("BOLdozer v3")
     #root.geometry('300x200')
     #root.configure(bg='#3E4149')
 
@@ -145,17 +145,23 @@ def sortHtmlFile(html_file_list):
 
     # Map DCs to locations, add locations to order_list
     total_po_ours = len(order_list)
-    excel_file = ('./dc-mappings.xlsx')
-    wb = xlrd.open_workbook(excel_file)
-    dc_mappings = wb.sheet_by_index(0)
+    dc_mapping_csv_file = open('./assets/dc-mappings-csv.csv')
+    csvreader = csv.reader(dc_mapping_csv_file)
+
+    header = []
+    header = next(csvreader)
+
+    rows = []
+    for row in csvreader:
+        rows.append(row)
 
     for i in range(total_po_ours):
-        for num in range(dc_mappings.nrows):
-            if int(order_list[i]['dc']) == int(dc_mappings.cell_value(num,0)):
-                order_list[i].update({
-                    'address':dc_mappings.cell_value(num,1),
-                    'city_state_zip':dc_mappings.cell_value(num,2)
-                })
+         for num in range(len(rows)): # looking thru the first column
+             if int(order_list[i]['dc']) == int(rows[num][0]):
+                 order_list[i].update({
+                     'address':str(rows[num][1]),
+                     'city_state_zip':str(rows[num][1])
+                 })
     
     # Calculate total weight and total packages
     for i in range(total_po_ours):
@@ -167,9 +173,9 @@ def sortHtmlFile(html_file_list):
 
     # Calculate total page numbers
     if type(total_po_ours / 8) == int:
-        total_pages = int(total_po_ours/8)
+        total_pages = int(total_po_ours / 8)
     else:
-        total_pages = int(((total_po_ours-(total_po_ours%8))/8)+1)
+        total_pages = int(((total_po_ours-(total_po_ours % 8)) / 8) + 1)
 
     # Organize data into master order list for master BOL
     for i in range(total_po_ours):
@@ -224,20 +230,20 @@ def mailMerge(order_list, master_order_list, dest_path):
 
     #directory = os.getcwd()
 
-    if os.path.isfile(f'{dest_path}/Walmart BOL {load_no}.docx'):
-        os.remove(f'{dest_path}/Walmart BOL {load_no}.docx')
+    if os.path.isfile(f'{dest_path}/WalmartBOL_{load_no}.docx'):
+        os.remove(f'{dest_path}/WalmartBOL_{load_no}.docx')
     
-    if os.path.isfile(f'{dest_path}/Walmart Master BOL Load ID {load_no}.docx'):
-        os.remove(f'{dest_path}/Walmart Master BOL Load ID {load_no}.docx')
+    if os.path.isfile(f'{dest_path}/WalmartMasterBOLLoadID_{load_no}.docx'):
+        os.remove(f'{dest_path}/WalmartMasterBOLLoadID_{load_no}.docx')
 
 
-    bol = MailMerge('bol_template.docx')
+    bol = MailMerge('./assets/bol_template.docx')
     bol.merge_pages(order_list)
-    bol.write(f'{dest_path}/Walmart BOL {load_no}.docx')
+    bol.write(f'{dest_path}/WalmartBOL_{load_no}.docx')
 
-    master_bol= MailMerge('master_bol_template.docx')
+    master_bol= MailMerge('./assets/master_bol_template.docx')
     master_bol.merge_pages(master_order_list)
-    master_bol.write(f'{dest_path}/Walmart Master BOL Load ID {load_no}.docx')
+    master_bol.write(f'{dest_path}/WalmartMasterBOLLoadID_{load_no}.docx')
 
     if sys.platform == 'darwin':
         def openFolder(path):
